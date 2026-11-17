@@ -1,0 +1,27 @@
+[tools]
+zig = "0.17.0"
+
+[tasks.setup]
+description = "Trust mise.toml and install the pinned Zig toolchain"
+run = "make bootstrap"
+
+[tasks.build]
+description = "Build release zource binary (zig-out/bin/zource)"
+run = "make build"
+
+[tasks.test]
+description = "Run zource unit test suite"
+run = "make test"
+
+[tasks.man]
+description = "Preview the local zource(1) man page"
+run = "man -l ./man/zource.1"
+
+[tasks.run]
+description = "Build and run zource on the current repository"
+depends = ["build"]
+run = "./zig-out/bin/zource ."
+
+[tasks.clean]
+description = "Remove Zig build caches and zig-out/"
+run = "make clean"
