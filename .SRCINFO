@@ -16,6 +16,6 @@ pkgbase = zource
 	provides = zource
 	conflicts = zource
 	source = zource-0.1.1.tar.gz::https://github.com/chrisfair/zource/archive/refs/tags/v0.1.1.tar.gz
-	sha256sums = 0000000000000000000000000000000000000000000000000000000000000000
+	sha256sums = dd09814f61987eaeef794042166524d69b1cf674afbaa8f59007cd2774fff1aa
 
 pkgname = zource
