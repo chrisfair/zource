@@ -19,9 +19,19 @@
   - **Live Working-Tree Watch (`--live`)**: Uses Linux `inotify` across directory trees to animate file creates, edits, and deletes as they happen.
   - **Headless FFmpeg / PPM Export (`--output-ppm <file|->`)**: Streams binary `P6` PPM frames with no terminal or display server required.
 
-## Build
+## Installation
 
-Requires Zig `0.17.0` (no external C headers or package dependencies required):
+### Arch Linux (AUR)
+
+```bash
+yay -S zource
+# or
+paru -S zource
+```
+
+### Build from Source
+
+Requires Zig `0.17.0+` (no external C headers or package dependencies required):
 
 ```bash
 zig build -Doptimize=ReleaseFast
@@ -72,3 +82,7 @@ cat events.log | ./zig-out/bin/zource --log -
 | `L` / `B` | Toggle labels / radial glow bloom |
 | `R` | Restart from first commit |
 | `Q` or `Esc` | Quit |
+
+## License
+
+Licensed under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`). See [LICENSE](LICENSE).

@@ -3,3 +3,5 @@ zig-cache/
 zig-out/
 *.ppm
 *.mp4
+*.pkg.tar*
+zource-*.tar.gz
