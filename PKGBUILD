@@ -18,7 +18,7 @@ optdepends=(
 provides=('zource')
 conflicts=('zource')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/chrisfair/$pkgname/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
+sha256sums=('dda681797df435f37d0b444a353bbb7cfcab4e88a2a29ab04d59a88c896c49fa')
 
 build() {
   cd "${srcdir}/${pkgname}-${pkgver}"
