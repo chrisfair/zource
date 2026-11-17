@@ -1,6 +1,6 @@
 # Maintainer: Christopher Patrick Fair <christopherpatrickfair@gmail.com>
 pkgname=zource
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="2D radial tree and 3D rotating bubble repository visualizer for Kitty, Ghostty, Foot, and Wayland"
 arch=('x86_64' 'aarch64')
@@ -18,22 +18,20 @@ optdepends=(
 provides=('zource')
 conflicts=('zource')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/chrisfair/$pkgname/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('dda681797df435f37d0b444a353bbb7cfcab4e88a2a29ab04d59a88c896c49fa')
+sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
 
 build() {
   cd "${srcdir}/${pkgname}-${pkgver}"
-  zig build \
-    -Doptimize=ReleaseFast \
-    --cache-dir "${srcdir}/zig-local-cache" \
-    --global-cache-dir "${srcdir}/zig-global-cache"
+  export ZIG_GLOBAL_CACHE_DIR="${srcdir}/zig-global-cache"
+  export ZIG_LOCAL_CACHE_DIR="${srcdir}/zig-local-cache"
+  zig build -Doptimize=ReleaseFast
 }
 
 check() {
   cd "${srcdir}/${pkgname}-${pkgver}"
-  zig build test \
-    --summary all \
-    --cache-dir "${srcdir}/zig-local-cache" \
-    --global-cache-dir "${srcdir}/zig-global-cache"
+  export ZIG_GLOBAL_CACHE_DIR="${srcdir}/zig-global-cache"
+  export ZIG_LOCAL_CACHE_DIR="${srcdir}/zig-local-cache"
+  zig build test --summary all
 }
 
 package() {
