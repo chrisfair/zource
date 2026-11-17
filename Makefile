@@ -15,6 +15,7 @@ test:
 
 install: build
 	install -Dm755 zig-out/bin/zource "$(DESTDIR)$(PREFIX)/bin/zource"
+	install -Dm644 man/zource.1 "$(DESTDIR)$(PREFIX)/share/man/man1/zource.1"
 	install -Dm644 README.md "$(DESTDIR)$(PREFIX)/share/doc/zource/README.md"
 	install -Dm644 LICENSE "$(DESTDIR)$(PREFIX)/share/licenses/zource/LICENSE"
 

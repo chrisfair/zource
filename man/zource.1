@@ -1,0 +1,347 @@
+.TH ZOURCE 1 "2026-11-16" "zource 0.1.2" "User Commands"
+.SH NAME
+zource \- 2D radial tree and 3D rotating bubble repository visualizer
+.SH SYNOPSIS
+.B zource
+.RI [ options ]
+.RI [ path | \- ]
+.SH DESCRIPTION
+.B zource
+visualizes software version-control history and live directory edits as an
+animated force-directed graph.
+By default it renders directly inside modern graphics-capable terminals
+(Kitty, Ghostty, WezTerm, and Foot), including over SSH on headless hosts
+where no X11 or Wayland libraries are installed.
+When
+.B \-w
+.RB ( \-\-wayland )
+is passed on a system with an active Wayland compositor,
+.B zource
+dynamically opens
+.IR libwayland-client.so.0 ,
+.IR libwayland-egl.so.1 ,
+.IR libEGL.so.1 ,
+and
+.I libGLESv2.so.2
+at runtime via
+.BR dlopen (3)
+to render hardware-accelerated 3D spheres in a native
+.I xdg_toplevel
+window (falling back to
+.I wl_shm
+shared-memory buffers if EGL/GLESv2 is unavailable).
+.PP
+Two visualization layouts are available and can be toggled live during
+playback with
+.BR Tab :
+.TP
+.B 3D Rotating Bubbles (default)
+Directories form nested translucent 3D Fresnel spheres arranged on Fibonacci
+orbital shells around their parent directories, enclosing lit 3D file orbs.
+Active contributors glide between clusters as glowing orbs and fire additive
+beams at files as commits occur.
+.TP
+.B 2D Radial Tree
+Directories radiate outward from the repository root in a 2D force-relaxed
+tree with file nodes arranged in phyllotaxis discs around each directory hub.
+.SH DISPLAY AND PROTOCOL SELECTION
+In terminal mode with
+.BR "\-\-protocol auto" ,
+.B zource
+selects a transport in the following order:
+.IP 1. 3
+Checks
+.BR KITTY_WINDOW_ID ,
+.BR GHOSTTY_RESOURCES_DIR ,
+.BR TERM ,
+and
+.B TERM_PROGRAM
+for Kitty-protocol terminals
+.RB ( kitty ,
+.BR ghostty ,
+.BR WezTerm ),
+or
+.B TERM=foot*
+for Sixel.
+.IP 2. 3
+If those variables are absent or generic (for example
+.B TERM=xterm\-256color
+over SSH), sends a non-blocking Kitty APC graphics query and VT Primary
+Device Attributes (DA1) request on
+.IR /dev/tty .
+Terminals replying with
+.B _Gi=31;OK
+receive zlib-compressed 24-bit RGB Kitty graphics frames
+.RB ( f=24,o=z );
+terminals advertising DA1 attribute
+.B 4
+(such as
+.BR foot (1))
+receive ordered-dithered 216-color RLE Sixel streams wrapped in DEC Mode 2026
+synchronized output.
+.IP 3. 3
+Otherwise falls back to 24-bit ANSI truecolor UTF-8 half-block
+.RB ( \[u2580] )
+cells.
+.PP
+Terminal control and keyboard/mouse input are read from
+.I /dev/tty
+so standard input remains free for piped event logs.
+.SH OPTIONS
+.SS Display and View Modes
+.TP
+.BR \-t ", " \-\-terminal
+Render inside the active terminal (default).
+.TP
+.BR \-w ", " \-\-wayland
+Open a native Wayland window, falling back to terminal rendering if
+.B WAYLAND_DISPLAY
+or Wayland client libraries are unavailable.
+.TP
+.B \-\-wayland\-only
+Open a native Wayland window and exit with an error if Wayland is unavailable.
+.TP
+.BR \-p ", " \-\-protocol " " \fImode\fR
+Select terminal graphics protocol:
+.BR auto " (default), " kitty ", " sixel ", or " ansi .
+.TP
+.B \-\-3d
+Start in 3D rotating bubble cluster mode (default).
+.TP
+.B \-\-2d
+Start in 2D radial tree mode.
+.TP
+.BI \-\-size " WxH"
+Set pixel resolution cap in terminal mode (default
+.BR 960x560 ),
+initial window dimensions in Wayland mode (default
+.BR 1280x720 ),
+or exact frame dimensions for
+.BR \-\-output\-ppm .
+.TP
+.BI \-\-fps " N"
+Set target frame rate between 1 and 144 (default: 30 in terminal/PPM mode,
+60 in Wayland mode).
+.SS Input and Export Sources
+.TP
+.BI \-\-vcs " kind"
+Select version-control or event source:
+.BR auto " (default), " git ", " hg ", " custom ", or " live .
+In
+.B auto
+mode,
+.B zource
+walks parent directories upward from
+.I path
+looking for
+.I .git
+or
+.IR .hg .
+.TP
+.B \-\-git
+Force Git history ingestion via
+.BR git-log (1).
+.TP
+.BR \-\-hg ", " \-\-mercurial
+Force Mercurial history ingestion via
+.BR hg (1).
+.TP
+.BI \-\-log " file"
+Read newline-delimited Gource custom log records from
+.I file
+or standard input when
+.I file
+is
+.BR \- .
+Also enabled automatically when standard input is not a TTY and no repository
+path was given.
+.TP
+.B \-\-live
+Seed the graph from the working directory and animate live file creations,
+modifications, and deletions via Linux
+.BR inotify (7).
+.TP
+.BR \-o ", " \-\-output\-ppm " " \fIfile\fR
+Render headless binary
+.B P6
+PPM frames to
+.I file
+or standard output
+.RB ( \- )
+for piping into video encoders such as
+.BR ffmpeg (1).
+Requires no terminal, X11, or Wayland session.
+.TP
+.BI \-\-max\-frames " N"
+Exit after rendering
+.I N
+frames.
+.TP
+.B \-\-stop\-at\-end
+Exit automatically when historical commit playback reaches the end.
+.SS Playback and Appearance
+.TP
+.BR \-s ", " \-\-seconds\-per\-day " " \fIseconds\fR
+Simulation speed in real seconds per repository day (default
+.BR 1.0 ).
+Smaller values play faster.
+.TP
+.BR \-n ", " \-\-max\-commits " " \fIN\fR
+Limit VCS ingestion to the most recent
+.I N
+commits or changesets.
+.TP
+.B \-\-loop
+Restart from the first event when playback finishes.
+.TP
+.B \-\-no\-auto\-skip
+Disable automatic fast-forwarding across multi-day idle gaps between commits.
+.TP
+.B \-\-no\-orbit
+Disable automatic 3D camera rotation on startup.
+.TP
+.B \-\-no\-labels
+Hide directory and contributor name labels in the scene.
+.TP
+.B \-\-no\-bloom
+Disable radial glow halos around active spheres.
+.TP
+.BR \-h ", " \-\-help
+Print command-line usage summary and exit.
+.SH INTERACTIVE CONTROLS
+The following inputs work in both terminal mode (via Kitty keyboard protocol
+and SGR mouse reporting) and native Wayland windows:
+.TP
+.B Space
+Pause or resume timeline playback.
+.TP
+.BR Tab ", " V ", " 2 ", " 3
+Smoothly transition between 2D Radial Tree and 3D Rotating Bubbles.
+.TP
+.B Left\-drag \fRor\fB Arrows \fR/\fB WASD
+Orbit camera yaw and pitch.
+.TP
+.B Right\-drag
+Pan camera viewport.
+.TP
+.B Scroll wheel \fRor\fB Z \fR/\fB X
+Zoom in or out.
+.TP
+.BR + " / " \- " (or " ] " / " [ ")"
+Increase or decrease playback speed.
+.TP
+.BR , " / " .
+Seek backward or forward by 5% of total history span.
+.TP
+.B O
+Toggle automatic 3D camera orbit.
+.TP
+.B L
+Toggle in-scene directory and author labels.
+.TP
+.B B
+Toggle radial sphere glow bloom.
+.TP
+.B R
+Restart simulation from the beginning.
+.TP
+.BR Q " or " Esc
+Quit and restore terminal state.
+.SH CUSTOM LOG FORMAT
+Lines read by
+.B \-\-log
+follow the pipe-delimited Gource custom log format:
+.PP
+.RS 4
+.nf
+\fItimestamp\fR|\fIauthor\fR|\fItype\fR|\fIpath\fR[|\fIRRGGBB\fR]
+.fi
+.RE
+.PP
+.I timestamp
+is Unix epoch seconds (integer or floating-point),
+.I type
+is
+.B A
+(added),
+.B M
+(modified), or
+.B D
+(deleted), and the optional sixth-digit hexadecimal
+.I RRGGBB
+field overrides the file's extension color.
+Lines beginning with
+.B #
+are ignored.
+.SH ENVIRONMENT
+.TP
+.B WAYLAND_DISPLAY
+Wayland socket name used when
+.B \-w
+or
+.B \-\-wayland
+is specified.
+.TP
+.BR TERM ", " TERM_PROGRAM ", " KITTY_WINDOW_ID ", " GHOSTTY_RESOURCES_DIR
+Inspected during
+.B \-\-protocol auto
+terminal capability detection before falling back to live APC/DA1 probing.
+.TP
+.B USER
+Default author name attributed to working-tree edits in
+.B \-\-live
+mode.
+.SH EXAMPLES
+Visualize the current Git or Mercurial repository as 3D rotating bubbles in
+Ghostty, Kitty, or Foot:
+.PP
+.RS 4
+.nf
+zource
+.fi
+.RE
+.PP
+Visualize another repository in a hardware-accelerated Wayland window at
+0.25 seconds per day:
+.PP
+.RS 4
+.nf
+zource \-\-wayland \-s 0.25 ~/src/project
+.fi
+.RE
+.PP
+Watch live working-tree edits in real time:
+.PP
+.RS 4
+.nf
+zource \-\-live .
+.fi
+.RE
+.PP
+Encode a 60 FPS 1080p MP4 video on a headless server with no display server:
+.PP
+.RS 4
+.nf
+zource \-\-size 1920x1080 \-\-fps 60 \-\-stop\-at\-end \-\-output\-ppm \- . \\
+  | ffmpeg \-y \-f image2pipe \-vcodec ppm \-r 60 \-i \- \-c:v libx264 \-pix_fmt yuv420p history.mp4
+.fi
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Clean exit.
+.TP
+.B 1
+Repository, VCS subprocess, or display initialization failure.
+.TP
+.B 2
+Invalid command-line option or argument.
+.SH AUTHORS
+Christopher Patrick Fair <christopherpatrickfair@gmail.com>
+.SH SEE ALSO
+.BR git\-log (1),
+.BR hg (1),
+.BR kitty (1),
+.BR foot (1),
+.BR ffmpeg (1),
+.BR inotify (7)

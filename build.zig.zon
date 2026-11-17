@@ -1,6 +1,6 @@
 .{
     .name = .zource,
-    .version = "0.1.1",
+    .version = "0.1.2",
     .fingerprint = 0x78852ebbd0160368,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
@@ -8,6 +8,7 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "man",
         "LICENSE",
         "README.md",
     },

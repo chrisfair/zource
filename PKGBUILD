@@ -1,6 +1,6 @@
 # Maintainer: Christopher Patrick Fair <christopherpatrickfair@gmail.com>
 pkgname=zource
-pkgver=0.1.1
+pkgver=0.1.2
 pkgrel=1
 pkgdesc="2D radial tree and 3D rotating bubble repository visualizer for Kitty, Ghostty, Foot, and Wayland"
 arch=('x86_64' 'aarch64')
@@ -37,6 +37,7 @@ check() {
 package() {
   cd "${srcdir}/${pkgname}-${pkgver}"
   install -Dm755 "zig-out/bin/${pkgname}" "${pkgdir}/usr/bin/${pkgname}"
+  install -Dm644 "man/${pkgname}.1" "${pkgdir}/usr/share/man/man1/${pkgname}.1"
   install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
