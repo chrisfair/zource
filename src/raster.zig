@@ -2,6 +2,7 @@ const std = @import("std");
 const vcs = @import("vcs.zig");
 const sim_mod = @import("sim.zig");
 const font = @import("font.zig");
+const poly = @import("polyhedron.zig");
 const Allocator = std.mem.Allocator;
 const Rgb = vcs.Rgb;
 const Simulation = sim_mod.Simulation;
@@ -25,6 +26,7 @@ const ProjectedItem = struct {
     alpha: f32,
     heat: f32,
     color: Rgb,
+    file_count: u32 = 0,
 };
 
 pub const Framebuffer = struct {
@@ -183,51 +185,109 @@ pub const Framebuffer = struct {
         }
     }
 
-    pub fn drawBubbleShell(self: *Framebuffer, cx: f32, cy: f32, radius: f32, c: Rgb, alpha_scale: f32, heat: f32) void {
-        if (radius < 2.0 or alpha_scale <= 0.01) return;
-        const r = @min(radius, @as(f32, @floatFromInt(@max(self.width, self.height))) * 0.65);
-        const min_x = @max(0, @as(i32, @intFromFloat(@floor(cx - r - 1.0))));
-        const max_x = @min(@as(i32, @intCast(self.width)) - 1, @as(i32, @intFromFloat(@ceil(cx + r + 1.0))));
-        const min_y = @max(0, @as(i32, @intFromFloat(@floor(cy - r - 1.0))));
-        const max_y = @min(@as(i32, @intCast(self.height)) - 1, @as(i32, @intFromFloat(@ceil(cy + r + 1.0))));
+    fn drawLineBlended(self: *Framebuffer, x0: f32, y0: f32, x1: f32, y1: f32, c: Rgb, alpha: f32) void {
+        if (alpha <= 0.01) return;
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        const steps_f = @max(@abs(dx), @abs(dy));
+        if (steps_f < 0.5) return;
+        const steps: usize = @min(2048, @as(usize, @intFromFloat(@ceil(steps_f))));
+        const sx = dx / @as(f32, @floatFromInt(steps));
+        const sy = dy / @as(f32, @floatFromInt(steps));
+        var px = x0;
+        var py = y0;
+        for (0..steps + 1) |_| {
+            self.blendPixel(@intFromFloat(@round(px)), @intFromFloat(@round(py)), c.r, c.g, c.b, alpha);
+            px += sx;
+            py += sy;
+        }
+    }
+
+    fn fillTriangleBlended(self: *Framebuffer, p0: [2]f32, p1: [2]f32, p2: [2]f32, c: Rgb, alpha: f32) void {
+        if (alpha <= 0.005) return;
+        const area = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+        if (@abs(area) < 0.25) return;
+
+        // Ensure consistent positive signed area for edge tests
+        const a = p0;
+        var b = p1;
+        var cc = p2;
+        if (area < 0.0) {
+            const tmp = b;
+            b = cc;
+            cc = tmp;
+        }
+
+        const min_x = @max(0, @as(i32, @intFromFloat(@floor(@min(a[0], @min(b[0], cc[0]))))));
+        const max_x = @min(@as(i32, @intCast(self.width)) - 1, @as(i32, @intFromFloat(@ceil(@max(a[0], @max(b[0], cc[0]))))));
+        const min_y = @max(0, @as(i32, @intFromFloat(@floor(@min(a[1], @min(b[1], cc[1]))))));
+        const max_y = @min(@as(i32, @intCast(self.height)) - 1, @as(i32, @intFromFloat(@ceil(@max(a[1], @max(b[1], cc[1]))))));
         if (min_x > max_x or min_y > max_y) return;
 
-        const inv_r = 1.0 / r;
-        const base_r: f32 = @floatFromInt(c.r);
-        const base_g: f32 = @floatFromInt(c.g);
-        const base_b: f32 = @floatFromInt(c.b);
+        const ab_x = b[0] - a[0];
+        const ab_y = b[1] - a[1];
+        const bc_x = cc[0] - b[0];
+        const bc_y = cc[1] - b[1];
+        const ca_x = a[0] - cc[0];
+        const ca_y = a[1] - cc[1];
 
         var y = min_y;
         while (y <= max_y) : (y += 1) {
-            const ny = (@as(f32, @floatFromInt(y)) + 0.5 - cy) * inv_r;
-            const ny2 = ny * ny;
-            if (ny2 >= 1.0) continue;
-
+            const py = @as(f32, @floatFromInt(y)) + 0.5;
             var x = min_x;
             while (x <= max_x) : (x += 1) {
-                const nx = (@as(f32, @floatFromInt(x)) + 0.5 - cx) * inv_r;
-                const d2 = nx * nx + ny2;
-                if (d2 >= 1.0) continue;
-
-                const nz = @sqrt(1.0 - d2);
-                const one_minus_nz = 1.0 - nz;
-                const fresnel = one_minus_nz * one_minus_nz * one_minus_nz;
-
-                const l_dot = @max(0.0, -0.45 * nx - 0.55 * ny + 0.70 * nz);
-                const l2 = l_dot * l_dot;
-                const l4 = l2 * l2;
-                const spec = l4 * l4 * l4 * 0.55;
-
-                const dist = @sqrt(d2);
-                const edge_aa = std.math.clamp((1.0 - dist) * r, 0.0, 1.0);
-
-                const shell_alpha = (0.035 + fresnel * (0.34 + heat * 0.24) + spec * 0.45) * alpha_scale * edge_aa;
-                const pr: u8 = @intFromFloat(@min(255.0, base_r * (0.75 + fresnel * 0.5) + spec * 235.0));
-                const pg: u8 = @intFromFloat(@min(255.0, base_g * (0.75 + fresnel * 0.5) + spec * 245.0));
-                const pb: u8 = @intFromFloat(@min(255.0, base_b * (0.75 + fresnel * 0.5) + spec * 255.0));
-
-                self.blendPixel(x, y, pr, pg, pb, shell_alpha);
+                const px = @as(f32, @floatFromInt(x)) + 0.5;
+                const w0 = ab_x * (py - a[1]) - ab_y * (px - a[0]);
+                const w1 = bc_x * (py - b[1]) - bc_y * (px - b[0]);
+                const w2 = ca_x * (py - cc[1]) - ca_y * (px - cc[0]);
+                if (w0 >= 0.0 and w1 >= 0.0 and w2 >= 0.0) {
+                    self.blendPixel(x, y, c.r, c.g, c.b, alpha);
+                }
             }
+        }
+    }
+
+    pub fn drawPolyhedronShell(
+        self: *Framebuffer,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        c: Rgb,
+        alpha_scale: f32,
+        heat: f32,
+        file_count: u32,
+        cam_yaw: f32,
+        cam_pitch: f32,
+        elapsed: f32,
+        dir_seed: u32,
+    ) void {
+        if (radius < 2.5 or alpha_scale <= 0.01) return;
+        const r = @min(radius, @as(f32, @floatFromInt(@max(self.width, self.height))) * 0.65);
+        const projected = poly.projectPolyhedron(
+            file_count,
+            cx,
+            cy,
+            r,
+            c,
+            alpha_scale,
+            heat,
+            cam_yaw,
+            cam_pitch,
+            elapsed,
+            dir_seed,
+        );
+
+        for (projected.faces[0..projected.face_count]) |face| {
+            self.fillTriangleBlended(face.p0, face.p1, face.p2, face.color, face.alpha);
+        }
+
+        const edge_col = Rgb{
+            .r = @intCast(@min(255, @as(u16, c.r) + 55)),
+            .g = @intCast(@min(255, @as(u16, c.g) + 55)),
+            .b = @intCast(@min(255, @as(u16, c.b) + 55)),
+        };
+        for (projected.edges[0..projected.edge_count]) |edge| {
+            self.drawLineBlended(edge.p0[0], edge.p0[1], edge.p1[0], edge.p1[1], edge_col, edge.alpha);
         }
     }
 
@@ -393,6 +453,7 @@ pub const Framebuffer = struct {
                     .alpha = b3d * fog,
                     .heat = d.heat,
                     .color = d.tint,
+                    .file_count = if (d.alive_files > 0) d.alive_files else d.subtree_files,
                 });
             } else {
                 self.drawLitSphere(cur_p.x, cur_p.y, @max(2.5, 4.0 * cur_p.scale), d.tint, 0.7, d.heat * 0.5, sim.enable_bloom);
@@ -484,7 +545,19 @@ pub const Framebuffer = struct {
 
         for (self.items_scratch.items) |item| {
             switch (item.kind) {
-                .dir_shell => self.drawBubbleShell(item.sx, item.sy, item.sr, item.color, item.alpha, item.heat),
+                .dir_shell => self.drawPolyhedronShell(
+                    item.sx,
+                    item.sy,
+                    item.sr,
+                    item.color,
+                    item.alpha,
+                    item.heat,
+                    item.file_count,
+                    sim.camera.yaw,
+                    sim.camera.pitch,
+                    sim.phase_clock,
+                    @intCast(item.index *% 37 +% 11),
+                ),
                 .file_orb => self.drawLitSphere(item.sx, item.sy, item.sr, item.color, item.alpha, item.heat * 0.9, sim.enable_bloom),
                 .author_orb => self.drawLitSphere(item.sx, item.sy, item.sr, item.color, item.alpha, 0.55 + item.heat * 0.45, sim.enable_bloom),
                 .particle => self.addPixel(@intFromFloat(item.sx), @intFromFloat(item.sy), item.color.r, item.color.g, item.color.b, item.alpha),

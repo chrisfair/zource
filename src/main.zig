@@ -514,6 +514,7 @@ test {
     _ = vcs;
     _ = sim_mod;
     _ = @import("font.zig");
+    _ = @import("polyhedron.zig");
     _ = raster;
     _ = terminal;
     _ = wayland;

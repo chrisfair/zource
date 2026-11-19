@@ -3,6 +3,7 @@ const vcs = @import("vcs.zig");
 const sim_mod = @import("sim.zig");
 const raster = @import("raster.zig");
 const font = @import("font.zig");
+const poly = @import("polyhedron.zig");
 const terminal = @import("terminal.zig");
 const Allocator = std.mem.Allocator;
 const Simulation = sim_mod.Simulation;
@@ -290,6 +291,8 @@ const GpuBackend = struct {
 
     sphere_verts: std.ArrayList(SphereVert) = .empty,
     line_verts: std.ArrayList(LineVert) = .empty,
+    poly_tri_verts: std.ArrayList(LineVert) = .empty,
+    poly_edge_verts: std.ArrayList(LineVert) = .empty,
     hud_rgba: []u8 = &.{},
     hud_w: u32 = 0,
     hud_h: u32 = 0,
@@ -1113,6 +1116,8 @@ fn initGpuBackend(gpa: Allocator, display: *WlDisplay, surface: *WlProxy, width:
 
 fn deinitGpuBackend(gpa: Allocator, g: *GpuBackend) void {
     if (g.hud_rgba.len > 0) gpa.free(g.hud_rgba);
+    g.poly_edge_verts.deinit(gpa);
+    g.poly_tri_verts.deinit(gpa);
     g.sphere_verts.deinit(gpa);
     g.line_verts.deinit(gpa);
     _ = g.eglMakeCurrent(g.egl_dpy, null, null, null);
@@ -1136,6 +1141,8 @@ const GpuSortItem = struct {
     alpha: f32,
     kind: f32,
     heat: f32,
+    file_count: u32 = 0,
+    dir_seed: u32 = 0,
 };
 
 fn projectGpu(sim: *const Simulation, p2: sim_mod.Vec2, p3: sim_mod.Vec3, wf: f32, hf: f32) struct { x: f32, y: f32, scale: f32, depth: f32, visible: bool } {
@@ -1268,6 +1275,8 @@ fn renderSceneGpu(gpa: Allocator, g: *GpuBackend, width: u32, height: u32, sim: 
                 .alpha = b3d * fog,
                 .kind = 1.0,
                 .heat = d.heat,
+                .file_count = if (d.alive_files > 0) d.alive_files else d.subtree_files,
+                .dir_seed = @intCast(idx *% 37 +% 11),
             });
         } else {
             try sort_items.append(gpa, .{
@@ -1376,47 +1385,137 @@ fn renderSceneGpu(gpa: Allocator, g: *GpuBackend, width: u32, height: u32, sim: 
         }
     }.farther);
 
+    const flushSpheres = struct {
+        fn run(gpu: *GpuBackend, w_f: f32, h_f: f32) void {
+            if (gpu.sphere_verts.items.len == 0) return;
+            gpu.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            gpu.glUseProgram(gpu.sphere_prog);
+            gpu.glUniform2f(gpu.glGetUniformLocation(gpu.sphere_prog, "u_res"), w_f, h_f);
+            gpu.glBufferData(
+                GL_ARRAY_BUFFER,
+                @intCast(gpu.sphere_verts.items.len * @sizeOf(SphereVert)),
+                gpu.sphere_verts.items.ptr,
+                GL_DYNAMIC_DRAW,
+            );
+            const loc_c: GLuint = @intCast(@max(0, gpu.glGetAttribLocation(gpu.sphere_prog, "a_center")));
+            const loc_r: GLuint = @intCast(@max(0, gpu.glGetAttribLocation(gpu.sphere_prog, "a_radius")));
+            const loc_uv: GLuint = @intCast(@max(0, gpu.glGetAttribLocation(gpu.sphere_prog, "a_uv")));
+            const loc_col: GLuint = @intCast(@max(0, gpu.glGetAttribLocation(gpu.sphere_prog, "a_color")));
+            const loc_meta: GLuint = @intCast(@max(0, gpu.glGetAttribLocation(gpu.sphere_prog, "a_meta")));
+
+            const stride: GLsizei = @sizeOf(SphereVert);
+            gpu.glEnableVertexAttribArray(loc_c);
+            gpu.glEnableVertexAttribArray(loc_r);
+            gpu.glEnableVertexAttribArray(loc_uv);
+            gpu.glEnableVertexAttribArray(loc_col);
+            gpu.glEnableVertexAttribArray(loc_meta);
+
+            gpu.glVertexAttribPointer(loc_c, 2, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "cx")));
+            gpu.glVertexAttribPointer(loc_r, 1, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "radius")));
+            gpu.glVertexAttribPointer(loc_uv, 2, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "uv_x")));
+            gpu.glVertexAttribPointer(loc_col, 4, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "r")));
+            gpu.glVertexAttribPointer(loc_meta, 2, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "kind")));
+
+            gpu.glDrawArrays(GL_TRIANGLES, 0, @intCast(gpu.sphere_verts.items.len));
+
+            gpu.glDisableVertexAttribArray(loc_c);
+            gpu.glDisableVertexAttribArray(loc_r);
+            gpu.glDisableVertexAttribArray(loc_uv);
+            gpu.glDisableVertexAttribArray(loc_col);
+            gpu.glDisableVertexAttribArray(loc_meta);
+            gpu.sphere_verts.clearRetainingCapacity();
+        }
+    }.run;
+
+    const flushPolys = struct {
+        fn run(gpu: *GpuBackend, w_f: f32, h_f: f32) void {
+            if (gpu.poly_tri_verts.items.len == 0 and gpu.poly_edge_verts.items.len == 0) return;
+            // line_fs outputs vec4(rgb * a, a); GL_ONE / GL_ONE_MINUS_SRC_ALPHA is exact standard alpha blending
+            gpu.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+            gpu.glUseProgram(gpu.line_prog);
+            gpu.glUniform2f(gpu.glGetUniformLocation(gpu.line_prog, "u_res"), w_f, h_f);
+            const a_pos: GLuint = @intCast(@max(0, gpu.glGetAttribLocation(gpu.line_prog, "a_pos")));
+            const a_col: GLuint = @intCast(@max(0, gpu.glGetAttribLocation(gpu.line_prog, "a_col")));
+            gpu.glEnableVertexAttribArray(a_pos);
+            gpu.glEnableVertexAttribArray(a_col);
+
+            if (gpu.poly_tri_verts.items.len > 0) {
+                gpu.glBufferData(
+                    GL_ARRAY_BUFFER,
+                    @intCast(gpu.poly_tri_verts.items.len * @sizeOf(LineVert)),
+                    gpu.poly_tri_verts.items.ptr,
+                    GL_DYNAMIC_DRAW,
+                );
+                gpu.glVertexAttribPointer(a_pos, 2, GL_FLOAT, 0, @sizeOf(LineVert), @ptrFromInt(0));
+                gpu.glVertexAttribPointer(a_col, 4, GL_FLOAT, 0, @sizeOf(LineVert), @ptrFromInt(8));
+                gpu.glDrawArrays(GL_TRIANGLES, 0, @intCast(gpu.poly_tri_verts.items.len));
+                gpu.poly_tri_verts.clearRetainingCapacity();
+            }
+
+            if (gpu.poly_edge_verts.items.len > 0) {
+                gpu.glBufferData(
+                    GL_ARRAY_BUFFER,
+                    @intCast(gpu.poly_edge_verts.items.len * @sizeOf(LineVert)),
+                    gpu.poly_edge_verts.items.ptr,
+                    GL_DYNAMIC_DRAW,
+                );
+                gpu.glVertexAttribPointer(a_pos, 2, GL_FLOAT, 0, @sizeOf(LineVert), @ptrFromInt(0));
+                gpu.glVertexAttribPointer(a_col, 4, GL_FLOAT, 0, @sizeOf(LineVert), @ptrFromInt(8));
+                gpu.glDrawArrays(GL_LINES, 0, @intCast(gpu.poly_edge_verts.items.len));
+                gpu.poly_edge_verts.clearRetainingCapacity();
+            }
+
+            gpu.glDisableVertexAttribArray(a_pos);
+            gpu.glDisableVertexAttribArray(a_col);
+        }
+    }.run;
+
+    g.poly_tri_verts.clearRetainingCapacity();
+    g.poly_edge_verts.clearRetainingCapacity();
+
     for (sort_items.items) |it| {
-        try pushSphereQuad(&g.sphere_verts, gpa, it);
+        if (it.kind > 0.5) {
+            flushSpheres(g, wf, hf);
+            const base_rgb = Rgb{
+                .r = @intFromFloat(std.math.clamp(it.r * 255.0, 0.0, 255.0)),
+                .g = @intFromFloat(std.math.clamp(it.g * 255.0, 0.0, 255.0)),
+                .b = @intFromFloat(std.math.clamp(it.b * 255.0, 0.0, 255.0)),
+            };
+            const projected = poly.projectPolyhedron(
+                it.file_count,
+                it.cx,
+                it.cy,
+                @min(it.sr, @max(wf, hf) * 0.65),
+                base_rgb,
+                it.alpha,
+                it.heat,
+                sim.camera.yaw,
+                sim.camera.pitch,
+                sim.phase_clock,
+                it.dir_seed,
+            );
+            for (projected.faces[0..projected.face_count]) |face| {
+                const fr = @as(f32, @floatFromInt(face.color.r)) / 255.0;
+                const fg = @as(f32, @floatFromInt(face.color.g)) / 255.0;
+                const fb = @as(f32, @floatFromInt(face.color.b)) / 255.0;
+                try g.poly_tri_verts.append(gpa, .{ .x = face.p0[0], .y = face.p0[1], .r = fr, .g = fg, .b = fb, .a = face.alpha });
+                try g.poly_tri_verts.append(gpa, .{ .x = face.p1[0], .y = face.p1[1], .r = fr, .g = fg, .b = fb, .a = face.alpha });
+                try g.poly_tri_verts.append(gpa, .{ .x = face.p2[0], .y = face.p2[1], .r = fr, .g = fg, .b = fb, .a = face.alpha });
+            }
+            const er = @min(1.0, it.r + 0.22);
+            const eg = @min(1.0, it.g + 0.22);
+            const eb = @min(1.0, it.b + 0.22);
+            for (projected.edges[0..projected.edge_count]) |edge| {
+                try g.poly_edge_verts.append(gpa, .{ .x = edge.p0[0], .y = edge.p0[1], .r = er, .g = eg, .b = eb, .a = edge.alpha });
+                try g.poly_edge_verts.append(gpa, .{ .x = edge.p1[0], .y = edge.p1[1], .r = er, .g = eg, .b = eb, .a = edge.alpha });
+            }
+        } else {
+            flushPolys(g, wf, hf);
+            try pushSphereQuad(&g.sphere_verts, gpa, it);
+        }
     }
-
-    if (g.sphere_verts.items.len > 0) {
-        g.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        g.glUseProgram(g.sphere_prog);
-        g.glUniform2f(g.glGetUniformLocation(g.sphere_prog, "u_res"), wf, hf);
-        g.glBufferData(
-            GL_ARRAY_BUFFER,
-            @intCast(g.sphere_verts.items.len * @sizeOf(SphereVert)),
-            g.sphere_verts.items.ptr,
-            GL_DYNAMIC_DRAW,
-        );
-        const loc_c: GLuint = @intCast(@max(0, g.glGetAttribLocation(g.sphere_prog, "a_center")));
-        const loc_r: GLuint = @intCast(@max(0, g.glGetAttribLocation(g.sphere_prog, "a_radius")));
-        const loc_uv: GLuint = @intCast(@max(0, g.glGetAttribLocation(g.sphere_prog, "a_uv")));
-        const loc_col: GLuint = @intCast(@max(0, g.glGetAttribLocation(g.sphere_prog, "a_color")));
-        const loc_meta: GLuint = @intCast(@max(0, g.glGetAttribLocation(g.sphere_prog, "a_meta")));
-
-        const stride: GLsizei = @sizeOf(SphereVert);
-        g.glEnableVertexAttribArray(loc_c);
-        g.glEnableVertexAttribArray(loc_r);
-        g.glEnableVertexAttribArray(loc_uv);
-        g.glEnableVertexAttribArray(loc_col);
-        g.glEnableVertexAttribArray(loc_meta);
-
-        g.glVertexAttribPointer(loc_c, 2, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "cx")));
-        g.glVertexAttribPointer(loc_r, 1, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "radius")));
-        g.glVertexAttribPointer(loc_uv, 2, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "uv_x")));
-        g.glVertexAttribPointer(loc_col, 4, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "r")));
-        g.glVertexAttribPointer(loc_meta, 2, GL_FLOAT, 0, stride, @ptrFromInt(@offsetOf(SphereVert, "kind")));
-
-        g.glDrawArrays(GL_TRIANGLES, 0, @intCast(g.sphere_verts.items.len));
-
-        g.glDisableVertexAttribArray(loc_c);
-        g.glDisableVertexAttribArray(loc_r);
-        g.glDisableVertexAttribArray(loc_uv);
-        g.glDisableVertexAttribArray(loc_col);
-        g.glDisableVertexAttribArray(loc_meta);
-    }
+    flushPolys(g, wf, hf);
+    flushSpheres(g, wf, hf);
 
     const hud_w = @max(320, width / 2);
     const hud_h = @max(180, height / 2);
