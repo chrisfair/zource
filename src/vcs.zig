@@ -91,9 +91,9 @@ pub fn resolveRealPath(gpa: Allocator, raw_path: []const u8) ![]u8 {
 
 pub fn detectRepo(gpa: Allocator, target_path: []const u8, requested: VcsKind) !RepoInfo {
     const abs_start = try resolveRealPath(gpa, target_path);
-    errdefer gpa.free(abs_start);
 
     if (requested == .git or requested == .hg or requested == .live or requested == .custom) {
+        errdefer gpa.free(abs_start);
         const base = std.fs.path.basename(abs_start);
         const name = try gpa.dupe(u8, if (base.len > 0) base else "root");
         return .{
@@ -103,13 +103,15 @@ pub fn detectRepo(gpa: Allocator, target_path: []const u8, requested: VcsKind) !
         };
     }
 
+    defer gpa.free(abs_start);
+
     var cur: []const u8 = abs_start;
     while (true) {
         var probe_buf: [4096]u8 = undefined;
         if (std.fmt.bufPrint(&probe_buf, "{s}/.git", .{cur})) |git_path| {
             if (pathExists(git_path)) {
                 const root_copy = try gpa.dupe(u8, cur);
-                gpa.free(abs_start);
+                errdefer gpa.free(root_copy);
                 const base = std.fs.path.basename(root_copy);
                 return .{
                     .kind = .git,
@@ -122,7 +124,7 @@ pub fn detectRepo(gpa: Allocator, target_path: []const u8, requested: VcsKind) !
         if (std.fmt.bufPrint(&probe_buf, "{s}/.hg", .{cur})) |hg_path| {
             if (pathExists(hg_path)) {
                 const root_copy = try gpa.dupe(u8, cur);
-                gpa.free(abs_start);
+                errdefer gpa.free(root_copy);
                 const base = std.fs.path.basename(root_copy);
                 return .{
                     .kind = .hg,
@@ -137,7 +139,6 @@ pub fn detectRepo(gpa: Allocator, target_path: []const u8, requested: VcsKind) !
         cur = parent;
     }
 
-    gpa.free(abs_start);
     return error.NoRepositoryFound;
 }
 
@@ -789,5 +790,10 @@ test "parse gource custom pipe format with optional hex color" {
     try std.testing.expectEqual(@as(u8, 0xFF), events.items[0].custom_color.?.r);
     try std.testing.expectEqual(@as(u8, 0x88), events.items[0].custom_color.?.g);
     try std.testing.expectEqual(@as(u8, 0x00), events.items[0].custom_color.?.b);
-    try std.testing.expectEqual(@as( ?Rgb, null), events.items[1].custom_color);
+    try std.testing.expectEqual(@as(?Rgb, null), events.items[1].custom_color);
+}
+
+test "detectRepo returns NoRepositoryFound without double-free or leak" {
+    const res = detectRepo(std.testing.allocator, "/tmp", .auto);
+    try std.testing.expectError(error.NoRepositoryFound, res);
 }

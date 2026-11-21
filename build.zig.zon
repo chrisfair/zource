@@ -1,6 +1,6 @@
 .{
     .name = .zource,
-    .version = "0.1.4",
+    .version = "0.1.5",
     .fingerprint = 0x78852ebbd0160368,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
