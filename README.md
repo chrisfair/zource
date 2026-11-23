@@ -2,7 +2,7 @@
 
 `zource` visualizes Git and Mercurial commit history (or live directory edits) as an animated force-directed graph, written in Zig.
 
-By default it renders inside graphics-capable terminals—Kitty, Ghostty, WezTerm, and Foot—including over SSH on headless Linux boxes where no X11 or Wayland libraries are installed. Passing `-w` (`--wayland`) dynamically opens `libwayland-client`, `libEGL`, and `libGLESv2` via `dlopen(3)` to run hardware-accelerated 3D sphere shaders in a native Wayland window (falling back to `wl_shm` shared-memory buffers if EGL/GLES is absent).
+By default it renders inside graphics-capable terminals—Kitty, Ghostty, WezTerm, and Foot—including over SSH on headless Linux boxes where no X11 or Wayland libraries are installed. Passing `-w` (`--wayland`) dynamically opens `libwayland-client`, `libEGL`, and `libGLESv2` via `dlopen(3)` to run hardware-accelerated 3D shaders in a native Wayland window (falling back to `wl_shm` shared-memory buffers if EGL/GLES is absent).
 
 ## Architecture & Protocols
 
@@ -16,7 +16,7 @@ Terminal rendering (`--protocol auto`) probes the active TTY when environment va
 
 Two layouts are available and can be toggled live with `Tab` (`2` / `3` / `v`):
 
-1. `3D Rotating Bubbles` (`--3d`, default): Directories form nested translucent Fresnel spheres arranged on Fibonacci orbital shells around parent directories, enclosing lit 3D file orbs and contributor orbs firing commit beams.
+1. `3D Rotating Polyhedra` (`--3d`, default): Directories form nested translucent faceted polyhedra (vertex count scaled by directory file count) arranged on Fibonacci orbital shells around parent directories, enclosing lit 3D file orbs and contributor orbs firing commit beams.
 2. `2D Radial Tree` (`--2d`): Force-relaxed radial directory tree with phyllotaxis file discs.
 
 Input sources:
@@ -51,7 +51,7 @@ zig build test
 ## Usage
 
 ```bash
-# 3D rotating bubbles in Ghostty, Kitty, or Foot
+# 3D rotating polyhedra in Ghostty, Kitty, or Foot
 ./zig-out/bin/zource
 
 # Start in 2D radial tree mode at 0.5 seconds per repository day
@@ -82,7 +82,7 @@ See `man -l ./man/zource.1` (or `man zource` once installed) for the full option
 | Input | Action |
 | :--- | :--- |
 | `Space` | Play / Pause timeline |
-| `Tab`, `V`, `2`, `3` | Morph between 2D Radial Tree and 3D Rotating Bubbles |
+| `Tab`, `V`, `2`, `3` | Morph between 2D Radial Tree and 3D Rotating Polyhedra |
 | `Left-drag` or `WASD` / `Arrows` | Orbit camera (`yaw` / `pitch`) |
 | `Right-drag` | Pan viewport |
 | `Scroll wheel` or `Z` / `X` | Zoom in / out |
